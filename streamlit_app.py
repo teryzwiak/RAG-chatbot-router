@@ -37,7 +37,7 @@ def get_expert(query, gemini_client):
                 {"role": "system", "content": ROUTER_PROMPT},
                 {"role": "user",   "content": query},
             ],
-            max_tokens=5,
+            max_tokens=25,
             temperature=0,
         )
         cat = resp.choices[0].message.content.strip().upper()
