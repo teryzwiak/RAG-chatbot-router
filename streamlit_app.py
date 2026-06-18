@@ -198,8 +198,8 @@ defaults = {
     "faiss_pojazdy": None,
     "faiss_prawo":   None,
     "faiss_lokalny": None,
-    "pojazdy_file":  None,
-    "prawo_file":    None,
+    "pojazdy_file":  "baza_wiedzy_rejestracja_pojazdow_poznan.pdf",
+    "prawo_file":    "baza_wiedzy_uprawnienia_do_kierowania_poznan.pdf",
     "lokalny_src":   None,   # ślad źródła ostatnio zaindeksowanego lokalnego
 }
 for k, v in defaults.items():
