@@ -6,15 +6,25 @@ import numpy as np
 from openai import OpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 
+PDF_POJAZDY = "baza_wiedzy_rejestracja_pojazdow_poznan.pdf"
+PDF_PRAWO_JAZDY = "baza_wiedzy_uprawnienia_do_kierowania_poznan.pdf"
+PDF_LOKALNY = None
+
 st.set_page_config(page_title="Asystent UMP – Poznań", page_icon="🏛️")
 st.title("🏛️ Wirtualny Asystent – Urząd Miasta Poznania")
+
+# ──────────────────────────────────────────────
+# EMBEDDINGI
+# ──────────────────────────────────────────────
 
 EMBED_MODEL_ID = "intfloat/e5-small-v2"
 EMBED_MODEL_KWARGS = {"device": "cpu", "trust_remote_code": True}
 
+
 @st.cache_resource
 def get_embeddings():
     return HuggingFaceEmbeddings(model_name=EMBED_MODEL_ID, model_kwargs=EMBED_MODEL_KWARGS)
+
 
 def read_pdf_bytes(file_bytes):
     """Wyciąga tekst z PDF-a podanego jako bytes."""
@@ -23,12 +33,14 @@ def read_pdf_bytes(file_bytes):
     doc.close()
     return text
 
+
 def read_pdf_path(path):
     """Wyciąga tekst z PDF-a podanego jako ścieżka lokalna."""
     doc = fitz.open(path)
     text = "".join(page.get_text() for page in doc)
     doc.close()
     return text
+
 
 def chunk_text(text, chunk_size=800, overlap=100):
     chunks, start = [], 0
@@ -39,6 +51,10 @@ def chunk_text(text, chunk_size=800, overlap=100):
         start += chunk_size - overlap
     return chunks
 
+# ──────────────────────────────────────────────
+# SŁOWNIK – mapowanie etykiet routera
+# ──────────────────────────────────────────────
+
 CATEGORY_MAP = {
     "POJAZDY":     "pojazdy",
     "PRAWO_JAZDY": "prawo_jazdy",
@@ -46,10 +62,15 @@ CATEGORY_MAP = {
     "LOKALNY":     "lokalny",   # 3. ekspert – lokalny LLM
 }
 
+# ──────────────────────────────────────────────
+# FAISS – tworzenie i przeszukiwanie
+# ──────────────────────────────────────────────
+
 class FAISSIndex:
     def __init__(self, index, metadata):
         self.index    = index
         self.metadata = metadata
+
 
 def build_index(documents):
     """Buduje indeks FAISS z listy dokumentów [{'filename':..., 'text':...}]."""
@@ -83,6 +104,9 @@ def retrieve(query, faiss_index, k=4):
     ]
     return "\n\n".join(chunks)
 
+# ──────────────────────────────────────────────
+# POMOCNIK: ładowanie PDF-ów z folderu lokalnego
+# ──────────────────────────────────────────────
 
 def load_folder(folder_path):
     """Wczytuje wszystkie PDF-y z podanego folderu. Zwraca listę dokumentów."""
@@ -94,6 +118,37 @@ def load_folder(folder_path):
             text = read_pdf_path(os.path.join(folder_path, fname))
             documents.append({"filename": fname, "text": text})
     return documents
+
+
+def load_from_config(cfg):
+    """
+    Ładuje dokumenty na podstawie wartości z sekcji konfiguracji.
+    cfg moze byc:
+      - None               -> brak konfiguracji, zwraca []
+      - "sciezka/plik.pdf" -> pojedynczy plik
+      - "sciezka/folder/"  -> cały folder
+      - ["plik1.pdf", ...]  -> lista plików
+    """
+    if cfg is None:
+        return []
+    if isinstance(cfg, list):
+        docs = []
+        for path in cfg:
+            if os.path.isfile(path):
+                docs.append({"filename": os.path.basename(path), "text": read_pdf_path(path)})
+            else:
+                st.warning(f"Plik nie istnieje: {path}")
+        return docs
+    if os.path.isdir(cfg):
+        return load_folder(cfg)
+    if os.path.isfile(cfg):
+        return [{"filename": os.path.basename(cfg), "text": read_pdf_path(cfg)}]
+    st.warning(f"Sciezka nie istnieje: {cfg}")
+    return []
+
+# ──────────────────────────────────────────────
+# ROUTER LLM
+# ──────────────────────────────────────────────
 
 def build_router_prompt(local_enabled, local_topic):
     local_line = ""
@@ -131,6 +186,9 @@ def get_expert(query, gemini_client, local_enabled, local_topic):
         cat = "OGOLNE"
     return CATEGORY_MAP[cat], cat
 
+# ──────────────────────────────────────────────
+# SYSTEM PROMPTS
+# ──────────────────────────────────────────────
 
 SYS_GEMINI = """Jesteś wirtualnym pracownikiem Urzędu Miasta Poznania, specjalistą ds. rejestracji pojazdów.
 Specjalizacja: rejestracja/wyrejestrowanie pojazdów, dowody i tablice rejestracyjne, sprzedaż pojazdu, zmiany w pojeździe.
@@ -144,6 +202,9 @@ Zasady: mów per Pan/Pani, podawaj konkretne dokumenty i opłaty. WAŻNE: obsłu
 Odpowiadaj na podstawie kontekstu z bazy wiedzy. Jeśli pytanie dotyczy rejestracji pojazdu – odesłaj do eksperta ds. pojazdów.
 Infolinia: 61 646 33 44 | bip.poznan.pl"""
 
+# ──────────────────────────────────────────────
+# WYWOŁANIA EKSPERTÓW
+# ──────────────────────────────────────────────
 
 def _build_messages(system, history, query, context):
     if context:
@@ -173,6 +234,9 @@ def ask_local(query, history, context, client, model_name, sys_prompt):
     resp = client.chat.completions.create(model=model_name, messages=msgs, temperature=0.3)
     return resp.choices[0].message.content
 
+# ──────────────────────────────────────────────
+# KLIENCI API (cache)
+# ──────────────────────────────────────────────
 
 @st.cache_resource
 def get_gemini_client():
@@ -192,24 +256,44 @@ def get_groq_client():
 def get_local_client(base_url, api_key):
     return OpenAI(api_key=api_key or "not-needed", base_url=base_url)
 
+# ──────────────────────────────────────────────
+# SESSION STATE
+# ──────────────────────────────────────────────
 
 defaults = {
     "messages":      [],
     "faiss_pojazdy": None,
     "faiss_prawo":   None,
     "faiss_lokalny": None,
-    "pojazdy_file":  "baza_wiedzy_rejestracja_pojazdow_poznan.pdf",
-    "prawo_file":    "baza_wiedzy_uprawnienia_do_kierowania_poznan.pdf",
+    "pojazdy_file":  None,
+    "prawo_file":    None,
     "lokalny_src":   None,   # ślad źródła ostatnio zaindeksowanego lokalnego
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# Auto-ładowanie indeksów z konfiguracji (tylko raz, przy pierwszym uruchomieniu sesji)
+def _autoload(cfg, state_key, src_key):
+    if cfg is not None and st.session_state[state_key] is None:
+        docs = load_from_config(cfg)
+        if docs:
+            with st.spinner(f"Ładuję bazę wiedzy z konfiguracji ({len(docs)} plik/ów)…"):
+                st.session_state[state_key] = build_index(docs)
+            st.session_state[src_key] = str(cfg)
+
+_autoload(PDF_POJAZDY,     "faiss_pojazdy", "pojazdy_file")
+_autoload(PDF_PRAWO_JAZDY, "faiss_prawo",   "prawo_file")
+_autoload(PDF_LOKALNY,     "faiss_lokalny", "lokalny_src")
+
+# ──────────────────────────────────────────────
+# SIDEBAR
+# ──────────────────────────────────────────────
 
 with st.sidebar:
     st.header("⚙️ Bazy wiedzy")
 
+    # ── 1. GEMINI – POJAZDY ──────────────────
     with st.expander("🚗 Gemini – Pojazdy", expanded=True):
         src_p = st.radio("Źródło PDF", ["Upload pliku", "Folder lokalny"], key="src_pojazdy")
 
