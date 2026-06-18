@@ -6,3 +6,5 @@ numpy
 langchain-huggingface
 langchain-community
 sentence-transformers
+PyMuPDF
+fitz
