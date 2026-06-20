@@ -261,13 +261,15 @@ def get_local_client(base_url, api_key):
 # ──────────────────────────────────────────────
 
 defaults = {
-    "messages":      [],
-    "faiss_pojazdy": None,
-    "faiss_prawo":   None,
-    "faiss_lokalny": None,
-    "pojazdy_file":  None,
-    "prawo_file":    None,
-    "lokalny_src":   None,   # ślad źródła ostatnio zaindeksowanego lokalnego
+    "messages":        [],
+    "faiss_pojazdy":   None,
+    "faiss_prawo":     None,
+    "faiss_lokalny":   None,
+    "pojazdy_file":    None,
+    "prawo_file":      None,
+    "lokalny_src":     None,
+    "active_expert":   None,
+    "active_category": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -422,8 +424,24 @@ with st.sidebar:
         st.caption("🖥️ Lokalny LLM obsługuje wybraną tematykę")
     st.caption("🔀 Router automatycznie kieruje zapytania")
 
+    # Informacja o aktywnym ekspercie
+    if st.session_state.active_expert:
+        LABEL_MAP_SIDEBAR = {
+            "POJAZDY":     "🚗 Ekspert: Pojazdy (Gemini)",
+            "PRAWO_JAZDY": "📋 Ekspert: Prawo jazdy (Groq / Llama)",
+            "OGOLNE":      "🏛️ Asystent ogólny (Gemini)",
+            "LOKALNY":     "🖥️ Ekspert lokalny",
+        }
+        st.info(f"Aktywny ekspert:\n{LABEL_MAP_SIDEBAR.get(st.session_state.active_category, '')}")
+        if st.button("🔄 Zmień eksperta"):
+            st.session_state.active_expert   = None
+            st.session_state.active_category = None
+            st.rerun()
+            
     if st.button("🗑️ Wyczyść historię"):
-        st.session_state.messages = []
+        st.session_state.messages        = []
+        st.session_state.active_expert   = None   # ← ZMIANA
+        st.session_state.active_category = None   # ← ZMIANA
         st.rerun()
 
 # ──────────────────────────────────────────────
@@ -460,11 +478,16 @@ if prompt := st.chat_input("Zadaj pytanie o rejestrację pojazdu lub prawo jazdy
     with st.chat_message("user", avatar="🧑"):
         st.write(prompt)
 
-    # Routing
-    with st.spinner("🔀 Kieruję do właściwego eksperta…"):
-        expert, category = get_expert(prompt, gemini_client, local_enabled, local_topic)
+    # FIX routing tylko przy pierwszej wiadomości
+    if st.session_state.active_expert is None:
+        with st.spinner("🔀 Kieruję do właściwego eksperta…"):
+            expert, category = get_expert(prompt, gemini_client, local_enabled, local_topic)
+        st.session_state.active_expert   = expert
+        st.session_state.active_category = category
+    else:
+        expert   = st.session_state.active_expert
+        category = st.session_state.active_category
 
-    # RAG – kontekst z właściwego indeksu
     context = ""
     if expert == "pojazdy" and st.session_state.faiss_pojazdy:
         context = retrieve(prompt, st.session_state.faiss_pojazdy)
@@ -473,7 +496,6 @@ if prompt := st.chat_input("Zadaj pytanie o rejestrację pojazdu lub prawo jazdy
     elif expert == "lokalny" and st.session_state.faiss_lokalny:
         context = retrieve(prompt, st.session_state.faiss_lokalny)
 
-    # Odpowiedź
     with st.chat_message("assistant", avatar=AVATAR.get(expert, "🏛️")):
         st.caption(LABEL_MAP.get(category, ""))
         with st.spinner("Generuję odpowiedź…"):
