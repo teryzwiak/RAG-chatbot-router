@@ -436,8 +436,8 @@ with st.sidebar:
             
     if st.button("🗑️ Wyczyść historię"):
         st.session_state.messages        = []
-        st.session_state.active_expert   = None   # ← ZMIANA
-        st.session_state.active_category = None   # ← ZMIANA
+        st.session_state.active_expert   = None
+        st.session_state.active_category = None
         st.rerun()
 
 # ──────────────────────────────────────────────
