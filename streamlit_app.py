@@ -433,10 +433,6 @@ with st.sidebar:
             "LOKALNY":     "🖥️ Ekspert lokalny",
         }
         st.info(f"Aktywny ekspert:\n{LABEL_MAP_SIDEBAR.get(st.session_state.active_category, '')}")
-        if st.button("🔄 Zmień eksperta"):
-            st.session_state.active_expert   = None
-            st.session_state.active_category = None
-            st.rerun()
             
     if st.button("🗑️ Wyczyść historię"):
         st.session_state.messages        = []
